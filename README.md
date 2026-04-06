@@ -16,10 +16,10 @@ Built for astronomy workflows including telescope alignment, observation plannin
 ## Installation
 
 ```bash
-cd stellarium-mcp
-npm install
-npm run build
+npm install -g stellarium-mcp
 ```
+
+Or use directly with `npx` — no install needed.
 
 ## Usage with Claude Desktop
 
@@ -31,12 +31,8 @@ Add this to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "stellarium": {
-      "command": "node",
-      "args": ["/FULL/PATH/TO/stellarium-mcp/build/index.js"],
-      "env": {
-        "STELLARIUM_HOST": "localhost",
-        "STELLARIUM_PORT": "8090"
-      }
+      "command": "npx",
+      "args": ["stellarium-mcp"]
     }
   }
 }
@@ -45,7 +41,16 @@ Add this to your Claude Desktop configuration file:
 ## Usage with Claude Code
 
 ```bash
-claude mcp add stellarium node /FULL/PATH/TO/stellarium-mcp/build/index.js
+claude mcp add stellarium -- npx stellarium-mcp
+```
+
+## Build from Source
+
+```bash
+git clone https://github.com/Alfredao/stellarium-mcp.git
+cd stellarium-mcp
+npm install
+npm run build
 ```
 
 ## Environment Variables

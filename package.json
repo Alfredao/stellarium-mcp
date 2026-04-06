@@ -4,7 +4,7 @@
   "description": "MCP server for controlling Stellarium planetarium software",
   "type": "module",
   "bin": {
-    "stellarium-mcp": "./build/index.js"
+    "stellarium-mcp": "build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod +x build/index.js",
