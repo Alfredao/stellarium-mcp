@@ -1,0 +1,33 @@
+{
+  "name": "stellarium-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for controlling Stellarium planetarium software",
+  "type": "module",
+  "bin": {
+    "stellarium-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x build/index.js",
+    "dev": "tsc --watch",
+    "start": "node build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "mcp",
+    "stellarium",
+    "astronomy",
+    "telescope",
+    "planetarium"
+  ],
+  "license": "MIT"
+}
