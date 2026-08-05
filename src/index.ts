@@ -14,7 +14,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { StellariumClient } from "./stellarium-client.js";
+import { StellariumClient, raDecToVector } from "./stellarium-client.js";
 
 // ─── Configuration ───────────────────────────────────────────────────
 
@@ -148,7 +148,93 @@ server.tool(
   }
 );
 
-// ─── 5. get_current_view ─────────────────────────────────────────────
+// ─── 5. point_to_coordinates ─────────────────────────────────────────
+
+server.tool(
+  "point_to_coordinates",
+  "Point the Stellarium view (and connected telescope, if any) at raw J2000 equatorial coordinates, for targets that have no catalogue name. Use point_to_object when the target has a name.",
+  {
+    ra_deg: z
+      .number()
+      .describe("Right ascension in DEGREES, J2000 epoch (0-360). Catalogues usually quote hours — multiply them by 15"),
+    dec_deg: z
+      .number()
+      .min(-90)
+      .max(90)
+      .describe("Declination in degrees, J2000 epoch (-90 to +90)"),
+    mode: z
+      .enum(["center", "zoom", "mark"])
+      .default("center")
+      .describe("What to do with the position: center on it, center and zoom in, or only mark it (default: center)"),
+  },
+  async ({ ra_deg, dec_deg, mode }) => {
+    try {
+      const position = raDecToVector(ra_deg, dec_deg);
+      await client.focusPosition(position, mode);
+      // Give Stellarium a moment to slew before reading back where it landed
+      await new Promise((r) => setTimeout(r, 500));
+      const view = await client.getView();
+      return textResult({
+        message: `Now pointing at RA ${ra_deg}°, Dec ${dec_deg}° (J2000, mode: ${mode})`,
+        requested: { ra_deg, dec_deg, j2000_vector: position },
+        current_view: view,
+        note: "Coordinates are interpreted as J2000. Positions for the current epoch will land slightly off.",
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 6. move_view ────────────────────────────────────────────────────
+
+server.tool(
+  "move_view",
+  "Pan the view by nudging it in a direction, like holding the arrow keys. Movement runs for the given duration and then stops automatically. Use this to explore around the current position; use point_to_object or point_to_coordinates to jump to a target.",
+  {
+    x: z
+      .number()
+      .min(-1)
+      .max(1)
+      .describe("Azimuth speed, -1 (left) to 1 (right). 1.0 matches the arrow key speed"),
+    y: z
+      .number()
+      .min(-1)
+      .max(1)
+      .describe("Altitude speed, -1 (down) to 1 (up). 1.0 matches the arrow key speed"),
+    duration_ms: z
+      .number()
+      .int()
+      .min(0)
+      .max(10000)
+      .default(500)
+      .describe("How long to move before stopping, in milliseconds (default: 500). Use 0 to keep moving until a later call sets x and y to 0"),
+  },
+  async ({ x, y, duration_ms }) => {
+    try {
+      await client.moveView(x, y);
+      // The move endpoint sets a velocity that keeps running until it is
+      // zeroed, so stop it here rather than leaving the view drifting.
+      if (duration_ms > 0) {
+        await new Promise((r) => setTimeout(r, duration_ms));
+        await client.moveView(0, 0);
+      }
+      const view = await client.getView();
+      return textResult({
+        message:
+          duration_ms > 0
+            ? `Moved (x: ${x}, y: ${y}) for ${duration_ms}ms and stopped`
+            : `Moving (x: ${x}, y: ${y}) — still in motion, call move_view with x: 0, y: 0 to stop`,
+        still_moving: duration_ms === 0 && (x !== 0 || y !== 0),
+        current_view: view,
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 7. get_current_view ─────────────────────────────────────────────
 
 server.tool(
   "get_current_view",
@@ -167,7 +253,7 @@ server.tool(
   }
 );
 
-// ─── 6. set_fov ──────────────────────────────────────────────────────
+// ─── 8. set_fov ──────────────────────────────────────────────────────
 
 server.tool(
   "set_fov",
@@ -192,7 +278,7 @@ server.tool(
 //  ALIGNMENT HELPER TOOLS
 // ═══════════════════════════════════════════════════════════════════════
 
-// ─── 7. suggest_alignment_stars ──────────────────────────────────────
+// ─── 9. suggest_alignment_stars ──────────────────────────────────────
 
 server.tool(
   "suggest_alignment_stars",
@@ -317,7 +403,7 @@ server.tool(
   }
 );
 
-// ─── 8. list_visible_objects ─────────────────────────────────────────
+// ─── 10. list_visible_objects ─────────────────────────────────────────
 
 server.tool(
   "list_visible_objects",
@@ -349,7 +435,7 @@ server.tool(
   }
 );
 
-// ─── 9. list_object_types ────────────────────────────────────────────
+// ─── 11. list_object_types ────────────────────────────────────────────
 
 server.tool(
   "list_object_types",
@@ -369,7 +455,7 @@ server.tool(
 //  TIME & LOCATION TOOLS
 // ═══════════════════════════════════════════════════════════════════════
 
-// ─── 10. set_time ────────────────────────────────────────────────────
+// ─── 12. set_time ────────────────────────────────────────────────────
 
 server.tool(
   "set_time",
@@ -408,7 +494,7 @@ server.tool(
   }
 );
 
-// ─── 11. set_time_to_now ─────────────────────────────────────────────
+// ─── 13. set_time_to_now ─────────────────────────────────────────────
 
 server.tool(
   "set_time_to_now",
@@ -432,11 +518,135 @@ server.tool(
   }
 );
 
+// ─── 14. set_location ────────────────────────────────────────────────
+
+server.tool(
+  "set_location",
+  "Set the observer location — where on Earth (or another planet) the sky is being simulated from. Either name a location from Stellarium's database with `id`, or give explicit coordinates. Fields you leave out keep their current value. Use search_locations to find valid ids, countries and planets.",
+  {
+    id: z
+      .string()
+      .optional()
+      .describe("Location id from Stellarium's database (e.g. 'Paris, France'). Cannot be combined with the coordinate fields"),
+    latitude: z
+      .number()
+      .min(-90)
+      .max(90)
+      .optional()
+      .describe("Latitude in degrees, positive north (-90 to 90)"),
+    longitude: z
+      .number()
+      .min(-180)
+      .max(180)
+      .optional()
+      .describe("Longitude in degrees, positive east (-180 to 180)"),
+    altitude: z
+      .number()
+      .optional()
+      .describe("Altitude above sea level in meters"),
+    name: z
+      .string()
+      .optional()
+      .describe("Display name for the location"),
+    country: z
+      .string()
+      .optional()
+      .describe("Country name — use search_locations with kind 'countries' for valid values"),
+    planet: z
+      .string()
+      .optional()
+      .describe("Planet to observe from (e.g. 'Earth', 'Mars') — use search_locations with kind 'planets' for valid values"),
+  },
+  async (fields) => {
+    try {
+      const { id, ...explicit } = fields;
+      const given = Object.entries(explicit).filter(([, v]) => v !== undefined);
+
+      // Stellarium silently ignores every other field when id is present, so
+      // reject the mix instead of quietly dropping half the request.
+      if (id !== undefined && given.length > 0) {
+        return errorResult(
+          `Cannot combine 'id' with ${given.map(([k]) => k).join(", ")} — Stellarium ignores the other fields when 'id' is given. Send either 'id' alone or the explicit fields.`
+        );
+      }
+      if (id === undefined && given.length === 0) {
+        return errorResult("Nothing to set — provide 'id' or at least one of latitude, longitude, altitude, name, country, planet.");
+      }
+
+      await client.setLocation(fields);
+      // Location changes recompute the sky; let it settle before reading back
+      await new Promise((r) => setTimeout(r, 300));
+      const status = await client.getStatus();
+      return textResult({
+        message: "Observer location updated",
+        location: status.location,
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 15. search_locations ────────────────────────────────────────────
+
+server.tool(
+  "search_locations",
+  "Search Stellarium's location database for observing sites, or list the valid country and planet names accepted by set_location. The site list holds thousands of entries, so pass a filter.",
+  {
+    kind: z
+      .enum(["locations", "countries", "planets"])
+      .default("locations")
+      .describe("What to list: observing sites, countries, or planets (default: locations)"),
+    filter: z
+      .string()
+      .optional()
+      .describe("Case-insensitive substring to match (e.g. 'lisbon', 'brazil'). Strongly recommended for 'locations'"),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe("Maximum number of results to return (default: 50)"),
+  },
+  async ({ kind, filter, limit }) => {
+    try {
+      let names: string[];
+      if (kind === "locations") {
+        names = await client.listLocations();
+      } else {
+        const entries =
+          kind === "countries" ? await client.listCountries() : await client.listPlanets();
+        names = entries.map((e) => e.name);
+      }
+
+      const needle = filter?.toLowerCase();
+      const matched = needle
+        ? names.filter((n) => n.toLowerCase().includes(needle))
+        : names;
+
+      return textResult({
+        kind,
+        filter: filter ?? null,
+        results: matched.slice(0, limit),
+        returned: Math.min(matched.length, limit),
+        total_matched: matched.length,
+        note:
+          matched.length > limit
+            ? `Showing ${limit} of ${matched.length} matches — narrow the filter or raise limit.`
+            : undefined,
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
 // ═══════════════════════════════════════════════════════════════════════
 //  ADVANCED TOOLS
 // ═══════════════════════════════════════════════════════════════════════
 
-// ─── 12. simbad_lookup ───────────────────────────────────────────────
+// ─── 16. simbad_lookup ───────────────────────────────────────────────
 
 server.tool(
   "simbad_lookup",
@@ -456,7 +666,7 @@ server.tool(
   }
 );
 
-// ─── 13. run_script ──────────────────────────────────────────────────
+// ─── 17. run_script ──────────────────────────────────────────────────
 
 server.tool(
   "run_script",
@@ -479,7 +689,82 @@ server.tool(
   }
 );
 
-// ─── 14. get_property ────────────────────────────────────────────────
+// ─── 18. run_script_file ─────────────────────────────────────────────
+
+server.tool(
+  "run_script_file",
+  "Run one of the script files bundled with Stellarium, by filename. Use list_scripts to see what is available. To execute your own code instead, use run_script. Fails if another script is already running — check get_script_status first.",
+  {
+    id: z
+      .string()
+      .describe("Script filename as returned by list_scripts (e.g. 'solar_eclipse_2019.ssc')"),
+  },
+  async ({ id }) => {
+    try {
+      const result = await client.runScript(id);
+      return textResult({
+        message: `Started script ${id}`,
+        result: result || "ok",
+        note: "Scripts run asynchronously — poll get_script_status, or call stop_script to abort.",
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 19. list_scripts ────────────────────────────────────────────────
+
+server.tool(
+  "list_scripts",
+  "List the Stellarium script files available to run with run_script_file.",
+  {},
+  async () => {
+    try {
+      const scripts = await client.listScripts();
+      return textResult(scripts);
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 20. get_script_status ───────────────────────────────────────────
+
+server.tool(
+  "get_script_status",
+  "Check whether a Stellarium script is currently running, and which one. Scripts run asynchronously, so use this to poll for completion after run_script_file.",
+  {},
+  async () => {
+    try {
+      const status = await client.getScriptStatus();
+      return textResult(status);
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 21. stop_script ─────────────────────────────────────────────────
+
+server.tool(
+  "stop_script",
+  "Stop the script that is currently running. Useful when a long script is holding up other operations — Stellarium refuses to start a new script while one is running.",
+  {},
+  async () => {
+    try {
+      const result = await client.stopScript();
+      return textResult({
+        message: "Stop requested",
+        result: result || "ok",
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 22. get_property ────────────────────────────────────────────────
 
 server.tool(
   "get_property",
@@ -499,7 +784,7 @@ server.tool(
   }
 );
 
-// ─── 15. set_property ────────────────────────────────────────────────
+// ─── 23. set_property ────────────────────────────────────────────────
 
 server.tool(
   "set_property",
@@ -522,7 +807,7 @@ server.tool(
   }
 );
 
-// ─── 16. toggle_display_feature ──────────────────────────────────────
+// ─── 24. toggle_display_feature ──────────────────────────────────────
 
 server.tool(
   "toggle_display_feature",
@@ -570,6 +855,29 @@ server.tool(
       const result = await client.doAction(actionId);
       return textResult({
         message: `Toggled ${feature}`,
+        result,
+      });
+    } catch (err) {
+      return errorResult(err);
+    }
+  }
+);
+
+// ─── 25. do_action ───────────────────────────────────────────────────
+
+server.tool(
+  "do_action",
+  "Trigger any Stellarium action by its id — the escape hatch for behaviour not covered by a dedicated tool. Boolean actions toggle. Prefer toggle_display_feature for the common display toggles. Unknown ids are ignored by Stellarium without an error.",
+  {
+    id: z
+      .string()
+      .describe("Action id (e.g. 'actionShow_Nebulas', 'actionGoto_Selected_Object', 'actionSet_Full_Screen_Global')"),
+  },
+  async ({ id }) => {
+    try {
+      const result = await client.doAction(id);
+      return textResult({
+        message: `Triggered ${id}`,
         result,
       });
     } catch (err) {
