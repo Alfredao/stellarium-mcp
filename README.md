@@ -71,6 +71,8 @@ npm run build
 | `search_object` | Search for celestial objects by name |
 | `get_object_info` | Get detailed info (coordinates, magnitude, rise/set times) |
 | `point_to_object` | Point the view/telescope to a named object |
+| `point_to_coordinates` | Point the view/telescope at raw J2000 RA/Dec coordinates |
+| `move_view` | Pan the view in a direction, with automatic stop |
 | `get_current_view` | Get current viewing direction in multiple coordinate systems |
 | `set_fov` | Set the field of view (zoom level) |
 
@@ -88,16 +90,23 @@ npm run build
 |---|---|
 | `set_time` | Set simulation time (Julian Day, UTC string, or time rate) |
 | `set_time_to_now` | Reset simulation to current real-world time |
+| `set_location` | Set the observer location by database id or explicit coordinates |
+| `search_locations` | Search observing sites, or list valid countries and planets |
 
 ### Advanced
 
 | Tool | Description |
 |---|---|
 | `simbad_lookup` | Query the SIMBAD astronomical database |
-| `run_script` | Execute Stellarium Script commands directly |
+| `run_script` | Execute Stellarium Script code directly |
+| `run_script_file` | Run one of Stellarium's bundled script files by name |
+| `list_scripts` | List the available script files |
+| `get_script_status` | Check whether a script is currently running |
+| `stop_script` | Stop the running script |
 | `get_property` | Read a Stellarium internal property |
 | `set_property` | Write a Stellarium internal property |
 | `toggle_display_feature` | Toggle display features (grids, constellations, atmosphere, etc.) |
+| `do_action` | Trigger any Stellarium action by id (escape hatch) |
 
 ## Example Conversations
 
@@ -109,6 +118,15 @@ npm run build
 
 **"What planets are visible right now?"**
 → Agent uses `list_visible_objects` with type "Planet", then `get_object_info` on each to check altitude.
+
+**"I'm observing from Atacama next week — what will the sky look like?"**
+→ Agent uses `search_locations` to find the site, `set_location` to move the observer there, then `set_time` to jump to the observing night.
+
+## Notes
+
+- `point_to_coordinates` takes right ascension in **degrees**, J2000 epoch. Catalogues usually quote RA in hours — multiply by 15.
+- Pointing by altitude/azimuth is not exposed as a tool. Stellarium's `altAz` vector frame is South-based, which conflicts with the North-based azimuth reported by `get_object_info`; use `run_script` if you need it.
+- Endpoints follow the [Stellarium 23.0 Remote Control API](https://stellarium.org/doc/23.0/remoteControlApi.html). Older Stellarium builds may not implement all of them.
 
 ## License
 
