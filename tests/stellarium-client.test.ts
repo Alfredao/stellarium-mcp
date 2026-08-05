@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as http from "node:http";
 import { EventEmitter } from "node:events";
-import { StellariumClient } from "../src/stellarium-client.js";
+import { StellariumClient, raDecToVector } from "../src/stellarium-client.js";
 
 // ─── Mock http.request ──────────────────────────────────────────────
 
@@ -291,6 +291,121 @@ describe("StellariumClient", () => {
     });
   });
 
+  describe("setLocation", () => {
+    it("sends only the fields that were supplied", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.setLocation({ latitude: -19.73, longitude: -42.63 });
+      const opts = mockRequest.mock.calls[0][0];
+      expect(opts.method).toBe("POST");
+      expect(opts.path).toBe("/api/location/setlocationfields");
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("latitude")).toBe("-19.73");
+      expect(params.get("longitude")).toBe("-42.63");
+      expect(params.get("altitude")).toBeNull();
+      expect(params.get("name")).toBeNull();
+    });
+
+    it("sends every explicit field when supplied", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.setLocation({
+        latitude: 38.7,
+        longitude: -9.1,
+        altitude: 100,
+        name: "Lisbon",
+        country: "Portugal",
+        planet: "Earth",
+      });
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("altitude")).toBe("100");
+      expect(params.get("name")).toBe("Lisbon");
+      expect(params.get("country")).toBe("Portugal");
+      expect(params.get("planet")).toBe("Earth");
+    });
+
+    it("sends id alone and drops the other fields", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      // Stellarium ignores the other fields when id is present, so the client
+      // must not send them and imply they were applied.
+      await client.setLocation({ id: "Paris, France", latitude: 10, name: "ignored" });
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("id")).toBe("Paris, France");
+      expect(params.get("latitude")).toBeNull();
+      expect(params.get("name")).toBeNull();
+    });
+
+    it("keeps zero values instead of treating them as absent", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.setLocation({ latitude: 0, longitude: 0, altitude: 0 });
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("latitude")).toBe("0");
+      expect(params.get("longitude")).toBe("0");
+      expect(params.get("altitude")).toBe("0");
+    });
+  });
+
+  describe("listCountries / listPlanets", () => {
+    it("returns localized name objects for countries", async () => {
+      setupMockResponse(
+        200,
+        JSON.stringify([{ name: "Portugal", name_i18n: "Portugal" }])
+      );
+      const result = await client.listCountries();
+      expect(result[0].name).toBe("Portugal");
+      expect(mockRequest.mock.calls[0][0].path).toBe("/api/location/countrylist");
+    });
+
+    it("hits the planet list endpoint", async () => {
+      setupMockResponse(200, JSON.stringify([{ name: "Mars", name_i18n: "Marte" }]));
+      const result = await client.listPlanets();
+      expect(result[0].name).toBe("Mars");
+      expect(mockRequest.mock.calls[0][0].path).toBe("/api/location/planetlist");
+    });
+  });
+
+  describe("focusPosition", () => {
+    it("sends the position as a JSON vector with the mode", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.focusPosition([1, 0, 0], "zoom");
+      const opts = mockRequest.mock.calls[0][0];
+      expect(opts.path).toBe("/api/main/focus");
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("position")).toBe("[1,0,0]");
+      expect(params.get("mode")).toBe("zoom");
+    });
+
+    it("defaults to center mode", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.focusPosition([0, 0, 1]);
+      const params = new URLSearchParams(req.write.mock.calls[0][0]);
+      expect(params.get("mode")).toBe("center");
+    });
+  });
+
+  describe("script service", () => {
+    it("runScript sends the script id", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.runScript("solar_eclipse.ssc");
+      expect(mockRequest.mock.calls[0][0].path).toBe("/api/scripts/run");
+      expect(req.write).toHaveBeenCalledWith("id=solar_eclipse.ssc");
+    });
+
+    it("getScriptStatus reads the status endpoint", async () => {
+      setupMockResponse(200, JSON.stringify({ scriptIsRunning: true, runningScriptId: "a.ssc" }));
+      const result = (await client.getScriptStatus()) as { scriptIsRunning: boolean };
+      expect(result.scriptIsRunning).toBe(true);
+      expect(mockRequest.mock.calls[0][0].path).toBe("/api/scripts/status");
+    });
+
+    it("stopScript posts without a body", async () => {
+      const { req } = setupMockResponse(200, "ok");
+      await client.stopScript();
+      const opts = mockRequest.mock.calls[0][0];
+      expect(opts.method).toBe("POST");
+      expect(opts.path).toBe("/api/scripts/stop");
+      expect(req.write).not.toHaveBeenCalled();
+    });
+  });
+
   describe("ping", () => {
     it("returns true on success", async () => {
       setupMockResponse(200, JSON.stringify({ location: {}, time: {}, view: {} }));
@@ -301,5 +416,50 @@ describe("StellariumClient", () => {
       setupMockResponse(500, "error");
       expect(await client.ping()).toBe(false);
     });
+  });
+});
+
+// ─── raDecToVector ──────────────────────────────────────────────────
+
+describe("raDecToVector", () => {
+  const closeTo = (v: [number, number, number], e: [number, number, number]) => {
+    v.forEach((n, i) => expect(n).toBeCloseTo(e[i], 10));
+  };
+
+  it("maps the vernal equinox to the x axis", () => {
+    closeTo(raDecToVector(0, 0), [1, 0, 0]);
+  });
+
+  it("maps RA 90° to the y axis", () => {
+    closeTo(raDecToVector(90, 0), [0, 1, 0]);
+  });
+
+  it("maps RA 180° to negative x", () => {
+    closeTo(raDecToVector(180, 0), [-1, 0, 0]);
+  });
+
+  it("maps the north celestial pole to the z axis", () => {
+    closeTo(raDecToVector(0, 90), [0, 0, 1]);
+  });
+
+  it("maps the south celestial pole to negative z", () => {
+    closeTo(raDecToVector(123, -90), [0, 0, -1]);
+  });
+
+  it("always returns a unit vector", () => {
+    // Vega, Canopus, and an arbitrary southern position
+    for (const [ra, dec] of [
+      [279.234, 38.784],
+      [95.988, -52.696],
+      [317.5, -71.2],
+    ]) {
+      const [x, y, z] = raDecToVector(ra, dec);
+      expect(Math.hypot(x, y, z)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("puts northern declinations above the equator", () => {
+    expect(raDecToVector(45, 30)[2]).toBeGreaterThan(0);
+    expect(raDecToVector(45, -30)[2]).toBeLessThan(0);
   });
 });
