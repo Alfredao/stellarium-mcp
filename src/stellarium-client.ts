@@ -73,6 +73,40 @@ export interface ObjectInfo {
   [key: string]: unknown;
 }
 
+/** An entry from the country or planet list: english name plus localized name. */
+export interface LocalizedName {
+  name: string;
+  name_i18n: string;
+}
+
+/**
+ * Fields accepted by the location service. Omitted fields keep their current
+ * value. `id` looks the location up by name and overrides everything else.
+ */
+export interface LocationFields {
+  id?: string;
+  latitude?: number;
+  longitude?: number;
+  altitude?: number;
+  name?: string;
+  country?: string;
+  planet?: string;
+}
+
+/**
+ * Convert equatorial coordinates to the rectangular unit vector that the
+ * view and focus endpoints expect.
+ *
+ * Stellarium takes directions as unit vectors rather than angles, so a J2000
+ * right ascension / declination pair has to be projected before it can be
+ * sent. Right ascension is in degrees — multiply catalogue hours by 15.
+ */
+export function raDecToVector(raDeg: number, decDeg: number): [number, number, number] {
+  const ra = (raDeg * Math.PI) / 180;
+  const dec = (decDeg * Math.PI) / 180;
+  return [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)];
+}
+
 export class StellariumClient {
   private host: string;
   private port: number;
@@ -190,6 +224,22 @@ export class StellariumClient {
     })) as string;
   }
 
+  /**
+   * Focus on a position given as a J2000 rectangular unit vector.
+   *
+   * Unlike setView this selects the sky position as well as centering on it,
+   * which is what drives a connected telescope.
+   */
+  async focusPosition(
+    position: [number, number, number],
+    mode: "center" | "zoom" | "mark" = "center"
+  ): Promise<string> {
+    return (await this.post("/api/main/focus", {
+      position: JSON.stringify(position),
+      mode,
+    })) as string;
+  }
+
   /** Move the view (simulates arrow key presses) */
   async moveView(x: number, y: number): Promise<string> {
     return (await this.post("/api/main/move", {
@@ -280,15 +330,35 @@ export class StellariumClient {
   }
 
   /** List countries */
-  async listCountries(): Promise<string[]> {
-    const result = await this.get("/api/location/countrylist");
-    if (typeof result === "string") {
-      return result
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+  async listCountries(): Promise<LocalizedName[]> {
+    return (await this.get("/api/location/countrylist")) as LocalizedName[];
+  }
+
+  /** List planets that can be used as an observing location */
+  async listPlanets(): Promise<LocalizedName[]> {
+    return (await this.get("/api/location/planetlist")) as LocalizedName[];
+  }
+
+  /**
+   * Set the observer location.
+   *
+   * Fields that are not supplied are left unchanged. Supplying `id` makes
+   * Stellarium look the location up in its database and ignore every other
+   * field, so callers should send either `id` or explicit fields, never both.
+   */
+  async setLocation(fields: LocationFields): Promise<string> {
+    const body: Record<string, string> = {};
+    if (fields.id !== undefined) {
+      body["id"] = fields.id;
+    } else {
+      if (fields.latitude !== undefined) body["latitude"] = fields.latitude.toString();
+      if (fields.longitude !== undefined) body["longitude"] = fields.longitude.toString();
+      if (fields.altitude !== undefined) body["altitude"] = fields.altitude.toString();
+      if (fields.name !== undefined) body["name"] = fields.name;
+      if (fields.country !== undefined) body["country"] = fields.country;
+      if (fields.planet !== undefined) body["planet"] = fields.planet;
     }
-    return result as string[];
+    return (await this.post("/api/location/setlocationfields", body)) as string;
   }
 
   // ─── SIMBAD Service ────────────────────────────────────────────────
