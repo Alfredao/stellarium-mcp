@@ -32,7 +32,7 @@ const client = new StellariumClient({
 
 const server = new McpServer({
   name: "stellarium-mcp",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 // ─── Helper: format a tool response ─────────────────────────────────
