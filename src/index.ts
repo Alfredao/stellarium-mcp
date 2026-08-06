@@ -14,7 +14,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { StellariumClient, raDecToVector } from "./stellarium-client.js";
+import { StellariumClient } from "./stellarium-client.js";
+import {
+  raDecToVector,
+  angularSeparation,
+  selectAlignmentStars,
+  type StarCandidate,
+} from "./astronomy.js";
 
 // ─── Configuration ───────────────────────────────────────────────────
 
@@ -317,12 +323,7 @@ server.tool(
       ];
 
       // Query each candidate for current position
-      const starData: Array<{
-        name: string;
-        altitude: number;
-        azimuth: number;
-        magnitude: number;
-      }> = [];
+      const starData: StarCandidate[] = [];
 
       for (const starName of alignmentCandidates) {
         try {
@@ -348,36 +349,24 @@ server.tool(
         }
       }
 
-      // Sort by magnitude (brightest first)
-      starData.sort((a, b) => a.magnitude - b.magnitude);
+      const selected = selectAlignmentStars(starData, count);
 
-      // Select well-spaced stars using a greedy algorithm
-      const selected: typeof starData = [];
-      const remaining = [...starData];
-
-      if (remaining.length > 0) {
-        // Start with the brightest star
-        selected.push(remaining.shift()!);
-
-        while (selected.length < count && remaining.length > 0) {
-          // Find the star that maximizes minimum angular separation from already selected stars
-          let bestIdx = 0;
-          let bestMinSep = -1;
-
-          for (let i = 0; i < remaining.length; i++) {
-            let minSep = Infinity;
-            for (const sel of selected) {
-              // Angular separation approximation using azimuth difference
-              const azDiff = Math.abs(remaining[i].azimuth - sel.azimuth);
-              const sep = Math.min(azDiff, 360 - azDiff);
-              minSep = Math.min(minSep, sep);
-            }
-            if (minSep > bestMinSep) {
-              bestMinSep = minSep;
-              bestIdx = i;
-            }
-          }
-          selected.push(remaining.splice(bestIdx, 1)[0]);
+      // Report how far apart the selection actually is — a small minimum
+      // separation means the sky had nothing better to offer, which is worth
+      // knowing before trusting the alignment.
+      const separations: number[] = [];
+      for (let i = 0; i < selected.length; i++) {
+        for (let j = i + 1; j < selected.length; j++) {
+          separations.push(
+            Math.round(
+              angularSeparation(
+                selected[i].altitude,
+                selected[i].azimuth,
+                selected[j].altitude,
+                selected[j].azimuth
+              ) * 100
+            ) / 100
+          );
         }
       }
 
@@ -389,13 +378,14 @@ server.tool(
           azimuth_deg: s.azimuth,
           magnitude: s.magnitude,
         })),
+        min_separation_deg: separations.length ? Math.min(...separations) : null,
         total_visible_bright_stars: starData.length,
         criteria: {
           min_altitude_deg: min_altitude,
           max_magnitude: max_magnitude,
           requested_count: count,
         },
-        tip: "Stars are selected to be well-spaced in azimuth for best alignment accuracy. Point to each star in order using point_to_object.",
+        tip: "Stars are selected for maximum angular separation on the sky, which is what alignment accuracy depends on. Point to each star in order using point_to_object.",
       });
     } catch (err) {
       return errorResult(err);
