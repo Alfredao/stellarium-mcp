@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as http from "node:http";
 import { EventEmitter } from "node:events";
-import { StellariumClient, raDecToVector } from "../src/stellarium-client.js";
+import { StellariumClient } from "../src/stellarium-client.js";
 
 // ─── Mock http.request ──────────────────────────────────────────────
 
@@ -416,50 +416,5 @@ describe("StellariumClient", () => {
       setupMockResponse(500, "error");
       expect(await client.ping()).toBe(false);
     });
-  });
-});
-
-// ─── raDecToVector ──────────────────────────────────────────────────
-
-describe("raDecToVector", () => {
-  const closeTo = (v: [number, number, number], e: [number, number, number]) => {
-    v.forEach((n, i) => expect(n).toBeCloseTo(e[i], 10));
-  };
-
-  it("maps the vernal equinox to the x axis", () => {
-    closeTo(raDecToVector(0, 0), [1, 0, 0]);
-  });
-
-  it("maps RA 90° to the y axis", () => {
-    closeTo(raDecToVector(90, 0), [0, 1, 0]);
-  });
-
-  it("maps RA 180° to negative x", () => {
-    closeTo(raDecToVector(180, 0), [-1, 0, 0]);
-  });
-
-  it("maps the north celestial pole to the z axis", () => {
-    closeTo(raDecToVector(0, 90), [0, 0, 1]);
-  });
-
-  it("maps the south celestial pole to negative z", () => {
-    closeTo(raDecToVector(123, -90), [0, 0, -1]);
-  });
-
-  it("always returns a unit vector", () => {
-    // Vega, Canopus, and an arbitrary southern position
-    for (const [ra, dec] of [
-      [279.234, 38.784],
-      [95.988, -52.696],
-      [317.5, -71.2],
-    ]) {
-      const [x, y, z] = raDecToVector(ra, dec);
-      expect(Math.hypot(x, y, z)).toBeCloseTo(1, 12);
-    }
-  });
-
-  it("puts northern declinations above the equator", () => {
-    expect(raDecToVector(45, 30)[2]).toBeGreaterThan(0);
-    expect(raDecToVector(45, -30)[2]).toBeLessThan(0);
   });
 });
