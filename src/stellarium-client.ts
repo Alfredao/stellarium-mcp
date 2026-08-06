@@ -93,20 +93,6 @@ export interface LocationFields {
   planet?: string;
 }
 
-/**
- * Convert equatorial coordinates to the rectangular unit vector that the
- * view and focus endpoints expect.
- *
- * Stellarium takes directions as unit vectors rather than angles, so a J2000
- * right ascension / declination pair has to be projected before it can be
- * sent. Right ascension is in degrees — multiply catalogue hours by 15.
- */
-export function raDecToVector(raDeg: number, decDeg: number): [number, number, number] {
-  const ra = (raDeg * Math.PI) / 180;
-  const dec = (decDeg * Math.PI) / 180;
-  return [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)];
-}
-
 export class StellariumClient {
   private host: string;
   private port: number;
